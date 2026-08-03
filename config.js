@@ -5,14 +5,14 @@
 // ---------------------------------------------------------------
 const CONFIG = {
   // TODO: paste the OAuth Client ID you create in Google Cloud Console
-  GOOGLE_CLIENT_ID: "YOUR_CLIENT_ID_HERE.apps.googleusercontent.com",
+  GOOGLE_CLIENT_ID: "586116883370-hoqnchlk7psfh294vl2bi941ndnlk3ra.apps.googleusercontent.com",
 
   // TODO: add every family member's Google email address that should
   // be allowed to sign in. Only these emails will be let in.
   ALLOWED_EMAILS: [
-    // "you@gmail.com",
-    // "sister@gmail.com",
-    // "cousin@gmail.com",
+    // "charlie.l.little@gmail.com",
+    // "margaretplittle@gmail.com",
+    // "lucy.little.tomlinson@gmail.com",
   ],
 
   // These map to the "Tom's Story" folder tree already created in Drive.
