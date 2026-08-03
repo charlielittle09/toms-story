@@ -6,8 +6,8 @@
   const uid = () => Math.random().toString(36).slice(2, 10);
 
   // ---------------- Default content ----------------
-  function mk(q){
-    return { id: uid(), q, a: '', skipped: false, media: [], _wasDone: false };
+  function mk(q, isCustom){
+    return { id: uid(), q, a: '', skipped: false, media: [], isCustom: !!isCustom, _wasDone: false };
   }
 
   function defaultData(){
@@ -259,16 +259,119 @@
     return res.json();
   }
 
-  async function uploadMediaBlob(blob, filename, parentId){
+  async function startResumableSession(filename, parentId, blob){
     const metadata = { name: filename, parents: [parentId] };
-    const form = new FormData();
-    form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
-    form.append('file', blob);
-    const res = await driveFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType', {
+    const initRes = await driveFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id,name,mimeType', {
       method: 'POST',
-      body: form
+      headers: {
+        'Content-Type': 'application/json; charset=UTF-8',
+        'X-Upload-Content-Type': blob.type || 'application/octet-stream',
+        'X-Upload-Content-Length': String(blob.size)
+      },
+      body: JSON.stringify(metadata)
     });
-    return res.json();
+    const sessionUrl = initRes.headers.get('Location');
+    if (!sessionUrl) throw new Error('Could not start an upload session with Drive.');
+    return sessionUrl;
+  }
+
+  async function uploadMediaBlob(blob, filename, parentId, onProgress){
+    const sessionUrl = await startResumableSession(filename, parentId, blob);
+    return uploadWithResume(sessionUrl, blob, onProgress);
+  }
+
+  function xhrPutChunk(url, blob, startByte, onProgress){
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', url, true);
+      if (startByte > 0){
+        xhr.setRequestHeader('Content-Range', `bytes ${startByte}-${blob.size - 1}/${blob.size}`);
+      }
+      xhr.upload.onprogress = (e) => {
+        if (onProgress) onProgress(startByte + e.loaded, blob.size);
+      };
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300){
+          try{ resolve(JSON.parse(xhr.responseText)); }
+          catch(e){ resolve({}); }
+        } else {
+          reject(Object.assign(new Error('Upload PUT failed with status ' + xhr.status), { xhrStatus: xhr.status }));
+        }
+      };
+      xhr.onerror = () => reject(new Error('Network error during upload'));
+      xhr.send(startByte > 0 ? blob.slice(startByte) : blob);
+    });
+  }
+
+  function queryResumeOffset(url, total){
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', url, true);
+      xhr.setRequestHeader('Content-Range', `bytes */${total}`);
+      xhr.onload = () => {
+        if (xhr.status === 308){
+          const range = xhr.getResponseHeader('Range');
+          const match = range && range.match(/bytes=0-(\d+)/);
+          resolve(match ? parseInt(match[1], 10) + 1 : 0);
+        } else if (xhr.status >= 200 && xhr.status < 300){
+          resolve(total); // already fully received
+        } else {
+          reject(new Error('Could not check upload status: ' + xhr.status));
+        }
+      };
+      xhr.onerror = () => reject(new Error('Network error checking upload status'));
+      xhr.send();
+    });
+  }
+
+  async function uploadWithResume(sessionUrl, blob, onProgress, maxAttempts){
+    maxAttempts = maxAttempts || 6;
+    let startByte = 0;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++){
+      try{
+        const result = await xhrPutChunk(sessionUrl, blob, startByte, onProgress);
+        if (result && result.id) return result;
+        // Fell through without an id — check how far we actually got and keep going.
+        startByte = await queryResumeOffset(sessionUrl, blob.size);
+      }catch(e){
+        if (attempt >= maxAttempts) throw e;
+        await new Promise(r => setTimeout(r, 1200 * attempt));
+        try{
+          startByte = await queryResumeOffset(sessionUrl, blob.size);
+        }catch(e2){
+          // Could not even check status (offline?) — retry from last known point next loop.
+        }
+      }
+    }
+    throw new Error('Upload did not complete after several attempts.');
+  }
+
+  function formatBytes(n){
+    if (n < 1024*1024) return Math.round(n/1024) + 'KB';
+    return (n/(1024*1024)).toFixed(1) + 'MB';
+  }
+
+  function makeProgressBar(){
+    const wrap = document.createElement('div');
+    wrap.className = 'upload-progress-wrap';
+    const bar = document.createElement('div');
+    bar.className = 'upload-progress-bar';
+    const fill = document.createElement('div');
+    fill.className = 'upload-progress-fill';
+    bar.appendChild(fill);
+    const label = document.createElement('div');
+    label.className = 'upload-progress-label';
+    label.textContent = 'Starting upload…';
+    wrap.appendChild(bar);
+    wrap.appendChild(label);
+    return {
+      wrap, fill, label,
+      update(loaded, total){
+        const pct = total ? Math.min(100, Math.round(loaded / total * 100)) : 0;
+        fill.style.width = pct + '%';
+        label.textContent = `Uploading… ${pct}% (${formatBytes(loaded)} / ${formatBytes(total)})`;
+      }
+    };
   }
 
   async function downloadMediaBlob(fileId){
@@ -278,6 +381,51 @@
 
   function folderForChapter(chapterId){
     return (CONFIG.CHAPTER_FOLDERS && CONFIG.CHAPTER_FOLDERS[chapterId]) || CONFIG.ROOT_FOLDER_ID;
+  }
+
+  function slugify(text, maxChars){
+    maxChars = maxChars || 30;
+    let s = (text || '').toLowerCase().replace(/[^a-z0-9\s-]/g, '').trim().replace(/\s+/g, '-');
+    if (s.length > maxChars){
+      s = s.slice(0, maxChars).replace(/-[^-]*$/, '');
+    }
+    s = s.replace(/^-+|-+$/g, '');
+    return s || 'question';
+  }
+
+  function todayStamp(){
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  function extForMime(mime){
+    if (!mime) return 'webm';
+    if (mime.includes('mp4')) return 'mp4';
+    if (mime.includes('webm')) return 'webm';
+    if (mime.includes('ogg')) return 'ogg';
+    return 'webm';
+  }
+
+  function getFileExtension(name, fallback){
+    const m = /\.([a-zA-Z0-9]+)$/.exec(name || '');
+    return m ? m[1].toLowerCase() : fallback;
+  }
+
+  function buildMediaFilename(chapter, p, kind, ext){
+    const qNum = chapter.prompts.indexOf(p) + 1;
+    const qNumStr = String(qNum > 0 ? qNum : 1).padStart(2, '0');
+    const slug = slugify(p.q, 30);
+    const partNum = p.media.filter(m => m.kind === kind).length + 1;
+    const chapterPart = chapter.name.replace(/[/\\]/g, '-');
+    const name = `${chapterPart} - Q${qNumStr} - ${slug} - Part ${partNum} - ${todayStamp()}.${ext}`;
+    return name.replace(/[/\\]/g, '-');
+  }
+
+  function buildMonthlyFilename(m, kind, ext){
+    const slug = slugify(m.label, 24);
+    const allMediaOfKind = m.entries.reduce((sum, e) => sum + (e.media || []).filter(x => x.kind === kind).length, 0);
+    const partNum = allMediaOfKind + 1;
+    const name = `Tell A Story - ${slug} - Part ${partNum} - ${todayStamp()}.${ext}`;
+    return name.replace(/[/\\]/g, '-');
   }
 
   // ---------------- Data load/save ----------------
@@ -310,7 +458,11 @@
       data.chapters.forEach(ch => ch.prompts.forEach(p => {
         if (!p.media) p.media = [];
         if (typeof p.skipped === 'undefined') p.skipped = false;
+        if (typeof p.isCustom === 'undefined') p.isCustom = false;
         p._wasDone = isDone(p);
+      }));
+      data.monthly.forEach(m => m.entries.forEach(e => {
+        if (!e.media) e.media = [];
       }));
     }
   }
@@ -345,7 +497,7 @@
     return candidates.find(c => window.MediaRecorder && MediaRecorder.isTypeSupported(c)) || '';
   }
 
-  function openRecorder(chapter, p, kind, hostEl){
+  function openRecorder(ctx, kind, hostEl){
     const existing = hostEl.querySelector('.recorder-panel');
     if (existing){ existing.remove(); return; }
 
@@ -433,21 +585,27 @@
 
         discardBtn.addEventListener('click', () => { panel.remove(); });
 
+        let uploadSessionUrl = null;
         saveBtn.addEventListener('click', async () => {
           saveBtn.disabled = true; discardBtn.disabled = true;
-          status.textContent = 'Uploading…';
+          const oldProgress = panel.querySelector('.upload-progress-wrap');
+          if (oldProgress) oldProgress.remove();
+          const progress = makeProgressBar();
+          panel.appendChild(progress.wrap);
           try{
-            const ext = kind === 'audio' ? 'webm' : 'webm';
-            const filename = `${chapter.name} - ${p.q.slice(0,40)} - ${Date.now()}.${ext}`.replace(/[/\\]/g,'-');
-            const uploaded = await uploadMediaBlob(blob, filename, folderForChapter(chapter.id));
-            p.media.push({ id: uid(), kind, driveFileId: uploaded.id, name: filename });
-            p.skipped = false;
-            await saveDataNow();
+            if (!uploadSessionUrl){
+              const ext = extForMime(blob.type);
+              const filename = ctx.buildFilename(kind, ext);
+              panel._filename = filename;
+              uploadSessionUrl = await startResumableSession(filename, ctx.folderId, blob);
+            }
+            const uploaded = await uploadWithResume(uploadSessionUrl, blob, (loaded, total) => progress.update(loaded, total));
             panel.remove();
-            renderAll();
+            await ctx.onSaved({ id: uid(), kind, driveFileId: uploaded.id, name: panel._filename });
+            ctx.refresh();
           }catch(e){
             console.error(e);
-            status.textContent = 'Upload failed — check connection and try again.';
+            progress.label.textContent = 'Upload interrupted — check your connection and click Save again. It will pick up where it left off, not start over.';
             saveBtn.disabled = false; discardBtn.disabled = false;
           }
         });
@@ -462,28 +620,35 @@
     });
   }
 
-  function handleFileUpload(chapter, p, fileList, hostEl){
-    const status = document.createElement('div');
-    status.className = 'upload-status';
-    status.textContent = `Uploading ${fileList.length} file(s)…`;
-    hostEl.appendChild(status);
+  function handleFileUpload(ctx, fileList, hostEl){
+    const files = Array.from(fileList);
+    const progress = makeProgressBar();
+    hostEl.appendChild(progress.wrap);
 
-    const uploads = Array.from(fileList).map(async file => {
-      const kind = file.type.startsWith('image') ? 'photo'
-        : file.type.startsWith('video') ? 'video'
-        : file.type.startsWith('audio') ? 'audio' : 'file';
-      const uploaded = await uploadMediaBlob(file, file.name, folderForChapter(chapter.id));
-      p.media.push({ id: uid(), kind, driveFileId: uploaded.id, name: file.name });
-    });
-
-    Promise.all(uploads).then(async () => {
-      p.skipped = false;
-      await saveDataNow();
-      renderAll();
-    }).catch(e => {
-      console.error(e);
-      status.textContent = 'Some uploads failed — check connection and try again.';
-    });
+    (async () => {
+      for (let i = 0; i < files.length; i++){
+        const file = files[i];
+        const prefix = files.length > 1 ? `File ${i + 1} of ${files.length}: ` : '';
+        const kind = file.type.startsWith('image') ? 'photo'
+          : file.type.startsWith('video') ? 'video'
+          : file.type.startsWith('audio') ? 'audio' : 'file';
+        const ext = getFileExtension(file.name, kind === 'photo' ? 'jpg' : kind === 'video' ? 'mp4' : kind === 'audio' ? 'm4a' : 'dat');
+        const filename = ctx.buildFilename(kind, ext);
+        try{
+          const uploaded = await uploadMediaBlob(file, filename, ctx.folderId, (loaded, total) => {
+            const pct = total ? Math.min(100, Math.round(loaded / total * 100)) : 0;
+            progress.fill.style.width = pct + '%';
+            progress.label.textContent = `${prefix}Uploading… ${pct}% (${formatBytes(loaded)} / ${formatBytes(total)})`;
+          });
+          await ctx.onSaved({ id: uid(), kind, driveFileId: uploaded.id, name: filename });
+        }catch(e){
+          console.error(e);
+          progress.label.textContent = `${prefix}Upload failed for "${file.name}" — check your connection and try uploading it again.`;
+          return;
+        }
+      }
+      ctx.refresh();
+    })();
   }
 
   async function playMedia(m, chip, btn){
@@ -533,6 +698,7 @@
       const icon = m.kind === 'video' ? '🎥' : m.kind === 'audio' ? '🎙️' : m.kind === 'photo' ? '📷' : '📄';
       const label = document.createElement('span');
       label.textContent = `${icon} ${m.name}`;
+      label.title = m.name;
       const btnGroup = document.createElement('div');
       const playBtn = document.createElement('button');
       playBtn.className = 'chip-btn';
@@ -590,16 +756,19 @@
     skipBtn.className = 'icon-btn skip';
     skipBtn.textContent = p.skipped ? '↺ bring back' : '⏭ skip for now';
     skipBtn.addEventListener('click', async () => { p.skipped = !p.skipped; await saveDataNow(); renderAll(); });
-    const rm = document.createElement('button');
-    rm.className = 'icon-btn remove';
-    rm.textContent = '✕ remove';
-    rm.addEventListener('click', async () => {
-      if (confirm('Remove this question? Any answer or recordings linked to it will be unlinked (files stay safe in Drive).')){
-        chapter.prompts = chapter.prompts.filter(x => x.id !== p.id);
-        await saveDataNow(); renderAll();
-      }
-    });
-    btns.appendChild(skipBtn); btns.appendChild(rm);
+    btns.appendChild(skipBtn);
+    if (p.isCustom){
+      const rm = document.createElement('button');
+      rm.className = 'icon-btn remove';
+      rm.textContent = '✕ remove';
+      rm.addEventListener('click', async () => {
+        if (confirm('Remove this question? Any answer or recordings linked to it will be unlinked (files stay safe in Drive).')){
+          chapter.prompts = chapter.prompts.filter(x => x.id !== p.id);
+          await saveDataNow(); renderAll();
+        }
+      });
+      btns.appendChild(rm);
+    }
     top.appendChild(btns);
     card.appendChild(top);
 
@@ -619,13 +788,24 @@
     const row = document.createElement('div');
     row.className = 'capture-row';
 
+    const promptCtx = {
+      folderId: folderForChapter(chapter.id),
+      buildFilename: (kind, ext) => buildMediaFilename(chapter, p, kind, ext),
+      onSaved: async (mediaEntry) => {
+        p.media.push(mediaEntry);
+        p.skipped = false;
+        await saveDataNow();
+      },
+      refresh: renderAll
+    };
+
     const recVideoBtn = document.createElement('button');
     recVideoBtn.className = 'capture-btn'; recVideoBtn.textContent = '🎥 Record video';
-    recVideoBtn.addEventListener('click', () => openRecorder(chapter, p, 'video', card));
+    recVideoBtn.addEventListener('click', () => openRecorder(promptCtx, 'video', card));
 
     const recAudioBtn = document.createElement('button');
     recAudioBtn.className = 'capture-btn'; recAudioBtn.textContent = '🎙️ Record audio';
-    recAudioBtn.addEventListener('click', () => openRecorder(chapter, p, 'audio', card));
+    recAudioBtn.addEventListener('click', () => openRecorder(promptCtx, 'audio', card));
 
     const uploadBtn = document.createElement('button');
     uploadBtn.className = 'capture-btn'; uploadBtn.textContent = '📎 Upload photo or video';
@@ -633,7 +813,7 @@
     fileInput.type = 'file'; fileInput.className = 'file-input-hidden';
     fileInput.accept = 'image/*,video/*,audio/*'; fileInput.multiple = true;
     fileInput.addEventListener('change', () => {
-      if (fileInput.files.length) handleFileUpload(chapter, p, fileInput.files, card);
+      if (fileInput.files.length) handleFileUpload(promptCtx, fileInput.files, card);
       fileInput.value = '';
     });
     uploadBtn.addEventListener('click', () => fileInput.click());
@@ -734,7 +914,7 @@
     const addBtn = document.createElement('button');
     addBtn.className = 'add-prompt'; addBtn.textContent = '+ Add a question';
     addBtn.addEventListener('click', async () => {
-      chapter.prompts.push(mk('A new question…'));
+      chapter.prompts.push(mk('A new question…', true));
       await saveDataNow(); renderAll();
     });
     container.appendChild(addBtn);
@@ -755,15 +935,67 @@
       const dateInput = document.createElement('input');
       dateInput.type = 'date'; dateInput.valueAsDate = new Date();
       const textInput = document.createElement('textarea');
-      textInput.placeholder = 'Write it here, or note that it was recorded instead…';
+      textInput.placeholder = 'Write it here, or capture a recording below…';
+
+      let draftEntry = null;
+      function ensureDraftEntry(){
+        if (!draftEntry){
+          draftEntry = { id: uid(), date: dateInput.value || todayStamp(), text: '', media: [] };
+          m.entries.unshift(draftEntry);
+        }
+        return draftEntry;
+      }
+
+      const monthlyCtx = {
+        folderId: CONFIG.MONTHLY_FOLDER_ID,
+        buildFilename: (kind, ext) => buildMonthlyFilename(m, kind, ext),
+        onSaved: async (mediaEntry) => {
+          const entry = ensureDraftEntry();
+          entry.media.push(mediaEntry);
+          entry.date = dateInput.value || entry.date;
+          await saveDataNow();
+        },
+        refresh: renderMonthly
+      };
+
       const addBtn = document.createElement('button');
       addBtn.className = 'monthly-form-btn'; addBtn.textContent = 'Add entry';
       addBtn.addEventListener('click', async () => {
-        if (!textInput.value.trim()) return;
-        m.entries.unshift({ id: uid(), date: dateInput.value || new Date().toISOString().slice(0,10), text: textInput.value.trim() });
-        await saveDataNow(); renderMonthly();
+        const text = textInput.value.trim();
+        if (!text) return;
+        const entry = ensureDraftEntry();
+        entry.text = text;
+        entry.date = dateInput.value || entry.date;
+        await saveDataNow();
+        renderMonthly();
       });
+
+      const captureRow = document.createElement('div');
+      captureRow.className = 'capture-row';
+      const recVideoBtn = document.createElement('button');
+      recVideoBtn.className = 'capture-btn'; recVideoBtn.textContent = '🎥 Record video';
+      const recAudioBtn = document.createElement('button');
+      recAudioBtn.className = 'capture-btn'; recAudioBtn.textContent = '🎙️ Record audio';
+      const uploadBtn = document.createElement('button');
+      uploadBtn.className = 'capture-btn'; uploadBtn.textContent = '📎 Upload photo or video';
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file'; fileInput.className = 'file-input-hidden';
+      fileInput.accept = 'image/*,video/*,audio/*'; fileInput.multiple = true;
+
+      const recorderHost = document.createElement('div');
+
+      recVideoBtn.addEventListener('click', () => openRecorder(monthlyCtx, 'video', recorderHost));
+      recAudioBtn.addEventListener('click', () => openRecorder(monthlyCtx, 'audio', recorderHost));
+      fileInput.addEventListener('change', () => {
+        if (fileInput.files.length) handleFileUpload(monthlyCtx, fileInput.files, recorderHost);
+        fileInput.value = '';
+      });
+      uploadBtn.addEventListener('click', () => fileInput.click());
+
+      captureRow.appendChild(recVideoBtn); captureRow.appendChild(recAudioBtn); captureRow.appendChild(uploadBtn); captureRow.appendChild(fileInput);
+
       form.appendChild(dateInput); form.appendChild(textInput); form.appendChild(addBtn);
+      form.appendChild(captureRow); form.appendChild(recorderHost);
       card.appendChild(form);
 
       const entries = document.createElement('div');
@@ -772,19 +1004,31 @@
         entries.innerHTML = '<div class="monthly-empty">No entries yet.</div>';
       } else {
         m.entries.forEach(e => {
+          if (!e.media) e.media = [];
           const row = document.createElement('div');
           row.className = 'monthly-entry';
           const del = document.createElement('button');
           del.className = 'monthly-entry-del'; del.textContent = '✕';
           del.addEventListener('click', async () => {
-            m.entries = m.entries.filter(x => x.id !== e.id);
-            await saveDataNow(); renderMonthly();
+            if (confirm('Remove this entry? (Any attached recording or photo stays safe in Drive, just unlinked from here.)')){
+              m.entries = m.entries.filter(x => x.id !== e.id);
+              await saveDataNow(); renderMonthly();
+            }
           });
           const d = document.createElement('div');
           d.className = 'monthly-entry-date'; d.textContent = e.date;
-          const t = document.createElement('div');
-          t.className = 'monthly-entry-text'; t.textContent = e.text;
-          row.appendChild(del); row.appendChild(d); row.appendChild(t);
+          row.appendChild(del); row.appendChild(d);
+          if (e.text){
+            const t = document.createElement('div');
+            t.className = 'monthly-entry-text'; t.textContent = e.text;
+            row.appendChild(t);
+          }
+          if (e.media.length){
+            const mediaWrap = document.createElement('div');
+            mediaWrap.className = 'media-list';
+            renderMediaList(e, mediaWrap, { readOnly: true });
+            row.appendChild(mediaWrap);
+          }
           entries.appendChild(row);
         });
       }
@@ -835,12 +1079,21 @@
       const h2 = document.createElement('h2'); h2.textContent = 'Tell A Story';
       section.appendChild(h2);
       data.monthly.forEach(m => m.entries.forEach(e => {
+        if (!e.media) e.media = [];
         const entry = document.createElement('div');
         entry.className = 'read-entry';
         const qEl = document.createElement('div'); qEl.className = 'read-q'; qEl.textContent = m.label + ' — ' + e.date;
         entry.appendChild(qEl);
-        const aEl = document.createElement('div'); aEl.className = 'read-a'; aEl.textContent = e.text;
-        entry.appendChild(aEl);
+        if (e.text){
+          const aEl = document.createElement('div'); aEl.className = 'read-a'; aEl.textContent = e.text;
+          entry.appendChild(aEl);
+        }
+        if (e.media.length){
+          const mediaWrap = document.createElement('div');
+          mediaWrap.className = 'media-list';
+          renderMediaList(e, mediaWrap, { readOnly: true });
+          entry.appendChild(mediaWrap);
+        }
         section.appendChild(entry);
       }));
       container.appendChild(section);
