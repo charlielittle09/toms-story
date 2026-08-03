@@ -194,8 +194,13 @@
       showApp();
       renderAll();
     }catch(e){
-      console.error(e);
-      alert('Sign-in did not go through. Please try again.');
+      console.error('Sign-in error details:', e);
+      const reason = ((e && (e.type || e.error || e.message)) || '').toString();
+      if (/popup/i.test(reason)){
+        alert('The Google sign-in window was blocked or closed before finishing — usually caused by an ad blocker or privacy extension. Try turning off extensions for this site (or use an Incognito/Private window), then Sign in again.');
+      } else {
+        alert('Sign-in did not go through' + (reason ? ' (' + reason + ')' : '') + '. Please try again.');
+      }
     }finally{
       if (btn) btn.disabled = false;
     }
