@@ -13,7 +13,7 @@
   function defaultData(){
     return {
       title: "Tom's Story",
-      subtitle: "In his own words, for the people who love him",
+      subtitle: "Gathered for the people who love him",
       activeChapter: 'c1',
       chapters: [
         { id:'c1', name:'Who Am I?', prompts:[
@@ -595,7 +595,7 @@
 
     const answer = document.createElement('textarea');
     answer.className = 'answer';
-    answer.placeholder = 'Type what he says here, or notes on the story…';
+    answer.placeholder = 'Type your answer here, or capture a recording below';
     answer.value = p.a;
     answer.addEventListener('input', () => {
       p.a = answer.value;
