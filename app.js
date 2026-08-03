@@ -486,9 +486,13 @@
     });
   }
 
-  async function playMedia(m, chip){
+  async function playMedia(m, chip, btn){
     const existingPlayer = chip.querySelector('.chip-player');
-    if (existingPlayer){ existingPlayer.remove(); return; }
+    if (existingPlayer){
+      existingPlayer.remove();
+      if (btn) btn.textContent = m.kind === 'photo' ? 'Show' : 'Play';
+      return;
+    }
     let url = blobUrlCache.get(m.driveFileId);
     if (!url){
       try{
@@ -497,7 +501,11 @@
         blobUrlCache.set(m.driveFileId, url);
       }catch(e){
         console.error(e);
-        alert('Could not load that file from Drive right now.');
+        if (String(e.message).includes('404')){
+          alert('This file couldn\'t be found in Drive — it may have been deleted or moved there. You can remove this entry with the ✕ so it stops showing up here.');
+        } else {
+          alert('Could not load that file from Drive right now. Check your connection and try again.');
+        }
         return;
       }
     }
@@ -511,6 +519,7 @@
     player.className = 'chip-player';
     player.src = url;
     chip.appendChild(player);
+    if (btn) btn.textContent = 'Hide';
   }
 
   function renderMediaList(p, container, opts){
@@ -526,8 +535,9 @@
       label.textContent = `${icon} ${m.name}`;
       const btnGroup = document.createElement('div');
       const playBtn = document.createElement('button');
-      playBtn.className = 'chip-btn'; playBtn.textContent = 'Play';
-      playBtn.addEventListener('click', () => playMedia(m, chip));
+      playBtn.className = 'chip-btn';
+      playBtn.textContent = m.kind === 'photo' ? 'Show' : 'Play';
+      playBtn.addEventListener('click', () => playMedia(m, chip, playBtn));
       btnGroup.appendChild(playBtn);
       if (!opts.readOnly){
         const delBtn = document.createElement('button');
