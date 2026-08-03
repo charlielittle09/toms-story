@@ -10,9 +10,9 @@ const CONFIG = {
   // TODO: add every family member's Google email address that should
   // be allowed to sign in. Only these emails will be let in.
   ALLOWED_EMAILS: [
-    // "charlie.l.little@gmail.com",
-    // "margaretplittle@gmail.com",
-    // "lucy.little.tomlinson@gmail.com",
+    "charlie.l.little@gmail.com",
+    "margaretplittle@gmail.com",
+    "lucy.little.tomlinson@gmail.com",
   ],
 
   // These map to the "Tom's Story" folder tree already created in Drive.
