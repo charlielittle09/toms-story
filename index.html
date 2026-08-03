@@ -26,14 +26,14 @@
 
   <!-- Main app -->
   <div id="appRoot" class="app" style="display:none;">
+    <div id="topBar" class="top-bar">
+      <span id="userEmailLabel"></span> · <button id="signOutBtn" class="text-btn">Sign out</button>
+    </div>
     <div class="wrap">
       <div class="cover">
         <div class="eyebrow">A life, gathered</div>
         <h1 class="title" id="titleEl" contenteditable="true" spellcheck="false"></h1>
         <p class="subtitle" id="subtitleEl" contenteditable="true" spellcheck="false"></p>
-        <div class="signed-in-row">
-          Signed in as <span id="userEmailLabel"></span> · <button id="signOutBtn" class="text-btn">Sign out</button>
-        </div>
         <div class="progress-row"><span id="progressLabel">0 of 0 memories captured</span></div>
         <div class="progress-row" style="margin-top:6px;">
           <div class="ribbon-track"><div class="ribbon-fill" id="ribbonFill" style="width:0%"></div></div>
@@ -43,7 +43,7 @@
 
       <div class="view-toggle">
         <button id="btnCapture" class="active">Capture</button>
-        <button id="btnMonthly">Every Month</button>
+        <button id="btnMonthly">Tell A Story</button>
         <button id="btnRead">The Story So Far</button>
       </div>
 
@@ -56,7 +56,7 @@
           <ul>
             <li>Any question can be skipped — it stays in place, marked "skipped for now," and can be brought back anytime.</li>
             <li>Questions are editable right on the card. Add your own with "+ Add a question," or remove one with the small ✕.</li>
-            <li>"Every Month" holds the two recurring prompts — each new entry adds to the list instead of replacing the last one.</li>
+            <li>"Tell A Story" holds the two recurring prompts — each new entry adds to the list instead of replacing the last one.</li>
             <li>If the camera/mic won't start on a device, "Upload photo or video" always works as a fallback — record with the phone's own camera app first, then upload the file here.</li>
           </ul>
         </div>

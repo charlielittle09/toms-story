@@ -13,7 +13,7 @@
   function defaultData(){
     return {
       title: "Tom's Story",
-      subtitle: "Gathered for the people who love him",
+      subtitle: "A private space for Tom to record his own story, with help from the people who love him.",
       activeChapter: 'c1',
       chapters: [
         { id:'c1', name:'Who Am I?', prompts:[
@@ -167,7 +167,7 @@
         accessToken = resp.access_token;
         resolve(resp);
       };
-      tokenClient.requestAccessToken({ prompt: interactive ? 'consent' : '' });
+      tokenClient.requestAccessToken({ prompt: interactive ? '' : 'none' });
     });
   }
 
@@ -663,10 +663,22 @@
   }
 
   // ---------------- Views ----------------
-  function findNextUp(){
-    for (const ch of data.chapters) for (const p of ch.prompts) if (!isDone(p) && !p.skipped) return { chapter: ch, prompt: p };
-    for (const ch of data.chapters) for (const p of ch.prompts) if (!isDone(p)) return { chapter: ch, prompt: p };
-    return null;
+  let spotlightOffset = 0;
+
+  function collectEligible(includeSkipped){
+    const list = [];
+    data.chapters.forEach(ch => ch.prompts.forEach(p => {
+      if (!isDone(p) && (includeSkipped || !p.skipped)) list.push({ chapter: ch, prompt: p });
+    }));
+    return list;
+  }
+
+  function findNextUp(offset){
+    offset = offset || 0;
+    let pool = collectEligible(false);
+    if (!pool.length) pool = collectEligible(true);
+    if (!pool.length) return null;
+    return pool[offset % pool.length];
   }
 
   function renderSpotlight(){
@@ -677,11 +689,11 @@
     heading.textContent = 'Up Next';
     wrap.appendChild(heading);
 
-    const next = findNextUp();
+    const next = findNextUp(spotlightOffset);
     if (!next){
       const doneBox = document.createElement('div');
       doneBox.className = 'spotlight';
-      doneBox.innerHTML = '<div class="all-caught-up">Every question has been answered or set aside — take a look at "The Story So Far," or check in on the Every Month prompts.</div>';
+      doneBox.innerHTML = '<div class="all-caught-up">Every question has been answered or set aside — take a look at "The Story So Far," or check in on "Tell A Story."</div>';
       wrap.appendChild(doneBox);
       return;
     }
@@ -692,7 +704,7 @@
     actions.className = 'spotlight-actions';
     const nextBtn = document.createElement('button');
     nextBtn.className = 'ghost-btn'; nextBtn.textContent = 'Show a different question →';
-    nextBtn.addEventListener('click', renderSpotlight);
+    nextBtn.addEventListener('click', () => { spotlightOffset++; renderSpotlight(); });
     actions.appendChild(nextBtn);
     spot.appendChild(actions);
     wrap.appendChild(spot);
@@ -820,7 +832,7 @@
     if (anyMonthly){
       const section = document.createElement('div');
       section.className = 'read-chapter';
-      const h2 = document.createElement('h2'); h2.textContent = 'Every Month';
+      const h2 = document.createElement('h2'); h2.textContent = 'Tell A Story';
       section.appendChild(h2);
       data.monthly.forEach(m => m.entries.forEach(e => {
         const entry = document.createElement('div');
@@ -850,6 +862,7 @@
   }
 
   function renderAll(){
+    spotlightOffset = 0;
     renderSpotlight(); renderNav(); renderCapture(); updateProgressUI();
   }
 
