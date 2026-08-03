@@ -160,15 +160,28 @@
     });
   }
 
-  function requestAccessToken(interactive){
+  const REQUIRED_SCOPE = 'https://www.googleapis.com/auth/drive';
+
+  function requestAccessTokenWithPrompt(promptValue){
     return new Promise((resolve, reject) => {
       tokenClient.callback = (resp) => {
         if (resp.error){ reject(resp); return; }
         accessToken = resp.access_token;
         resolve(resp);
       };
-      tokenClient.requestAccessToken({ prompt: interactive ? '' : 'none' });
+      tokenClient.requestAccessToken({ prompt: promptValue });
     });
+  }
+
+  async function requestAccessToken(interactive){
+    let resp = await requestAccessTokenWithPrompt(interactive ? '' : 'none');
+    if (interactive && (!resp.scope || !resp.scope.includes(REQUIRED_SCOPE))){
+      // Google sometimes reuses a session without reattaching every previously-granted
+      // scope (especially a broad one like Drive). Force a full consent prompt once
+      // to guarantee a properly-scoped token, rather than failing outright.
+      resp = await requestAccessTokenWithPrompt('consent');
+    }
+    return resp;
   }
 
   async function fetchUserEmail(){
