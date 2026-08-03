@@ -13,7 +13,7 @@
   function defaultData(){
     return {
       title: "Tom's Story",
-      subtitle: "Gathered by the people who love him",
+      subtitle: "In his own words, for the people who love him",
       activeChapter: 'c1',
       chapters: [
         { id:'c1', name:'Who Am I?', prompts:[
@@ -513,7 +513,8 @@
     chip.appendChild(player);
   }
 
-  function renderMediaList(p, container){
+  function renderMediaList(p, container, opts){
+    opts = opts || {};
     container.innerHTML = '';
     p.media.forEach(m => {
       const chip = document.createElement('div');
@@ -527,17 +528,20 @@
       const playBtn = document.createElement('button');
       playBtn.className = 'chip-btn'; playBtn.textContent = 'Play';
       playBtn.addEventListener('click', () => playMedia(m, chip));
-      const delBtn = document.createElement('button');
-      delBtn.className = 'chip-btn'; delBtn.textContent = '✕';
-      delBtn.style.marginLeft = '6px';
-      delBtn.addEventListener('click', async () => {
-        if (confirm('Remove from this list? (The file stays safe in Drive, just unlinked here.)')){
-          p.media = p.media.filter(x => x.id !== m.id);
-          await saveDataNow();
-          renderAll();
-        }
-      });
-      btnGroup.appendChild(playBtn); btnGroup.appendChild(delBtn);
+      btnGroup.appendChild(playBtn);
+      if (!opts.readOnly){
+        const delBtn = document.createElement('button');
+        delBtn.className = 'chip-btn'; delBtn.textContent = '✕';
+        delBtn.style.marginLeft = '6px';
+        delBtn.addEventListener('click', async () => {
+          if (confirm('Remove from this list? (The file stays safe in Drive, just unlinked here.)')){
+            p.media = p.media.filter(x => x.id !== m.id);
+            await saveDataNow();
+            renderAll();
+          }
+        });
+        btnGroup.appendChild(delBtn);
+      }
       row.appendChild(label); row.appendChild(btnGroup);
       chip.appendChild(row);
       container.appendChild(chip);
@@ -553,12 +557,11 @@
     const stamp = document.createElement('div');
     stamp.className = 'stamp' + (isDone(p) ? ' show' : '');
     stamp.textContent = 'Captured';
-    card.appendChild(stamp);
 
     if (opts.spotlight){
       const eyebrow = document.createElement('div');
       eyebrow.className = 'spotlight-eyebrow';
-      eyebrow.textContent = 'Up next · ' + chapter.name;
+      eyebrow.textContent = chapter.name;
       card.appendChild(eyebrow);
     }
 
@@ -569,6 +572,7 @@
     q.textContent = p.q;
     q.addEventListener('blur', () => { p.q = q.textContent.trim(); debouncedSave(); renderNav(); });
     top.appendChild(q);
+    top.appendChild(stamp);
 
     const btns = document.createElement('div');
     btns.className = 'card-btns';
@@ -658,9 +662,17 @@
   function renderSpotlight(){
     const wrap = document.getElementById('spotlightWrap');
     wrap.innerHTML = '';
+    const heading = document.createElement('h2');
+    heading.className = 'section-heading';
+    heading.textContent = 'Up Next';
+    wrap.appendChild(heading);
+
     const next = findNextUp();
     if (!next){
-      wrap.innerHTML = '<div class="spotlight"><div class="all-caught-up">Every question has been answered or set aside — take a look at "Read the story so far," or check in on the Every Month prompts.</div></div>';
+      const doneBox = document.createElement('div');
+      doneBox.className = 'spotlight';
+      doneBox.innerHTML = '<div class="all-caught-up">Every question has been answered or set aside — take a look at "The Story So Far," or check in on the Every Month prompts.</div>';
+      wrap.appendChild(doneBox);
       return;
     }
     const spot = document.createElement('div');
@@ -780,15 +792,17 @@
         entry.className = 'read-entry';
         const qEl = document.createElement('div'); qEl.className = 'read-q'; qEl.textContent = p.q;
         entry.appendChild(qEl);
-        const aEl = document.createElement('div');
         if (p.a && p.a.trim()){
+          const aEl = document.createElement('div');
           aEl.className = 'read-a'; aEl.textContent = p.a;
-        } else {
-          aEl.className = 'read-a pending';
-          const names = p.media.map(m => m.name).join(', ');
-          aEl.textContent = 'See attached recording/photo — ' + names;
+          entry.appendChild(aEl);
         }
-        entry.appendChild(aEl);
+        if (p.media && p.media.length){
+          const mediaWrap = document.createElement('div');
+          mediaWrap.className = 'media-list';
+          renderMediaList(p, mediaWrap, { readOnly: true });
+          entry.appendChild(mediaWrap);
+        }
         section.appendChild(entry);
       });
       container.appendChild(section);
