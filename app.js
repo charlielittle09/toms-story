@@ -603,7 +603,7 @@
         saveRow.className = 'recorder-actions';
         const saveBtn = document.createElement('button');
         saveBtn.className = 'capture-btn';
-        saveBtn.textContent = '💾 Save to Drive';
+        saveBtn.textContent = '💾 Save';
         const discardBtn = document.createElement('button');
         discardBtn.className = 'capture-btn';
         discardBtn.textContent = '🗑 Discard, try again';
@@ -615,7 +615,11 @@
         status.className = 'upload-status';
         panel.appendChild(status);
 
-        discardBtn.addEventListener('click', () => { panel.remove(); });
+        discardBtn.addEventListener('click', () => {
+          if (confirm('Discard this recording? It has not been saved, and this cannot be undone.')){
+            panel.remove();
+          }
+        });
 
         let uploadSessionUrl = null;
         saveBtn.addEventListener('click', async () => {
