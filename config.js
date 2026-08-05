@@ -36,6 +36,7 @@ const CONFIG = {
     "tom.richert@gmail.com": "admin",
     "yeongju.richert@gmail.com": "admin",
     "jrlittle42@gmail.com": "view_only",       // Janie / Mom
+    "charlielittle09@gmail.com": "view_only",  // Charlie's second account (testing)
   },
 
   // These map to the "Tom's Story" folder tree already created in Drive.
