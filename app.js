@@ -129,9 +129,14 @@
   let storyFileId = null;
   let accessToken = null;
   let currentUserEmail = null;
+  let currentUserRole = null;
   let tokenClient = null;
   let view = 'capture';
   const blobUrlCache = new Map();
+
+  const ROLES = { SUPER_ADMIN: 'super_admin', ADMIN: 'admin', VIEW_ONLY: 'view_only' };
+  function isSuperAdmin(){ return currentUserRole === ROLES.SUPER_ADMIN; }
+  function isViewOnly(){ return currentUserRole === ROLES.VIEW_ONLY; }
 
   // ---------------- Utilities ----------------
   function debounce(fn, wait){
@@ -198,14 +203,23 @@
     try{
       await requestAccessToken(true);
       const email = await fetchUserEmail();
-      if (!CONFIG.ALLOWED_EMAILS.includes(email)){
+      const role = CONFIG.ALLOWED_EMAILS[email];
+      if (!role){
         showNotAllowed(email);
         return;
       }
       currentUserEmail = email;
+      currentUserRole = role;
       await loadStoryData();
       showApp();
-      renderAll();
+      if (isViewOnly()){
+        document.getElementById('btnCapture').style.display = 'none';
+        document.getElementById('btnMonthly').style.display = 'none';
+        updateProgressUI();
+        setView('read');
+      } else {
+        renderAll();
+      }
     }catch(e){
       console.error('Sign-in error details:', e);
       const reason = ((e && (e.type || e.error || e.message)) || '').toString();
@@ -762,7 +776,10 @@
     const top = document.createElement('div');
     top.className = 'card-top';
     const q = document.createElement('div');
-    q.className = 'question'; q.contentEditable = 'true'; q.spellcheck = false;
+    q.className = 'question'; q.spellcheck = false;
+    const canEditQuestionText = isSuperAdmin() || p.isCustom;
+    q.contentEditable = canEditQuestionText ? 'true' : 'false';
+    q.style.cursor = canEditQuestionText ? 'text' : 'default';
     q.textContent = p.q;
     q.addEventListener('blur', () => { p.q = q.textContent.trim(); debouncedSave(); renderNav(); });
     top.appendChild(q);
@@ -1140,9 +1157,16 @@
   function showApp(){
     document.getElementById('signInScreen').style.display = 'none';
     document.getElementById('appRoot').style.display = 'block';
-    document.getElementById('titleEl').textContent = data.title;
-    document.getElementById('subtitleEl').textContent = data.subtitle;
+    const titleEl = document.getElementById('titleEl');
+    const subtitleEl = document.getElementById('subtitleEl');
+    titleEl.textContent = data.title;
+    subtitleEl.textContent = data.subtitle;
     document.getElementById('userEmailLabel').textContent = currentUserEmail;
+    const canEditMeta = isSuperAdmin();
+    titleEl.contentEditable = canEditMeta ? 'true' : 'false';
+    subtitleEl.contentEditable = canEditMeta ? 'true' : 'false';
+    titleEl.style.cursor = canEditMeta ? 'text' : 'default';
+    subtitleEl.style.cursor = canEditMeta ? 'text' : 'default';
   }
 
   // ---------------- Init ----------------
