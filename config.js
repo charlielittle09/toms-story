@@ -30,11 +30,11 @@ const CONFIG = {
     "lucy.little.tomlinson@gmail.com": "super_admin",
     "margaretplittle@gmail.com": "super_admin",
     "ted.j.tomlinson@gmail.com": "super_admin",
+    "yeongju.richert@gmail.com": "super_admin",
     "charleslit@gmail.com": "admin",
     "effie.richert@gmail.com": "admin",
     "garyrichert@gmail.com": "admin",
     "tom.richert@gmail.com": "admin",
-    "yeongju.richert@gmail.com": "admin",
     "jrlittle42@gmail.com": "view_only",       // Janie / Mom
     "charlielittle09@gmail.com": "view_only",  // Charlie's second account (testing)
   },
