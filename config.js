@@ -31,6 +31,7 @@ const CONFIG = {
     "margaretplittle@gmail.com": "super_admin",
     "ted.j.tomlinson@gmail.com": "super_admin",
     "yeongju.richert@gmail.com": "super_admin",
+    "yeongjupark@gmail.com": "super_admin",
     "charleslit@gmail.com": "admin",
     "effie.richert@gmail.com": "admin",
     "garyrichert@gmail.com": "admin",
